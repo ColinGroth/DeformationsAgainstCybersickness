@@ -1,0 +1,13 @@
+#pragma kernel FullReset
+
+RWStructuredBuffer<float2> points;
+uint NumPoints;
+
+[numthreads(64, 1, 1)]
+void FullReset(uint3 id : SV_DispatchThreadID)
+{
+    if (id.x < NumPoints)
+    {
+        points[id.x] = float2(0.0, 0.0);
+    }
+}

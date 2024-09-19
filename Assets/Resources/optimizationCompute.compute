@@ -1,0 +1,116 @@
+#pragma kernel ComputeMovement
+
+Texture2DArray<float2> motionVectors;
+Texture2DArray<float> contrast;
+RWStructuredBuffer<float2> points;
+RWStructuredBuffer<float2> pointsPrev;
+RWStructuredBuffer<float2> velocities;
+
+SamplerState sampler_motionVectors;
+SamplerState sampler_contrast;
+
+uint NumPoints;
+uint Width;
+uint Height;
+float4 _EyePositionLeft;
+float4 _EyePositionRight;
+uint Iteration;
+float CamVelocity; //in m/s
+float IsMoving;
+
+
+[numthreads(64, 1, 1)] //TODO: make 16x16 thread group with proper indexing
+void ComputeMovement(uint3 id : SV_DispatchThreadID)
+{
+    if (id.x < NumPoints)
+    {
+        const bool isRightEye = id.x * 2 / NumPoints;
+        const bool isOddIteration = Iteration % 2;
+        uint2 coords = uint2(id.x % Width, (id.x / Width) % Height);
+        const uint pIdx = id.x + isOddIteration * NumPoints;
+        float2 cellSize = float2(1.0 / (Width + 1), 1.0 / (Height + 1));
+
+        // positions are relative to default vertex position (regular grid) 
+        // dimensions are in uv space
+        // neighbors are defined clockwise starting left
+        float2 neighbor1 = float2(-cellSize.x, 0);
+        float2 neighbor2 = float2(0, -cellSize.y);
+        float2 neighbor3 = float2(cellSize.x, 0);
+        float2 neighbor4 = float2(0, cellSize.y);
+        float2 n1_prev = neighbor1;
+        float2 n2_prev = neighbor2;
+        float2 n3_prev = neighbor3;
+        float2 n4_prev = neighbor4;
+
+        float2 pointIn = points[pIdx];
+        float2 pointIn_prev = pointsPrev[id.x];
+        if (coords.x > 0)
+        {
+            neighbor1 += points[pIdx - 1];
+            n1_prev += pointsPrev[id.x - 1];
+        }
+        if (coords.x < Width - 1)
+        {
+            neighbor3 += points[pIdx + 1];
+            n3_prev += pointsPrev[id.x + 1];
+        }
+        if (coords.y > 0)
+        {
+            neighbor2 += points[pIdx - Width];
+            n2_prev += pointsPrev[id.x - Width];
+        }
+        if (coords.y < Height - 1)
+        {
+            neighbor4 += points[pIdx + Width];
+            n4_prev += pointsPrev[id.x + Width];
+        }
+
+        // 
+        // make euler step
+        //
+        float2 velocity;
+        if (Iteration == 0)
+        {
+            float2 eyePositions[2] = { _EyePositionLeft.xy, _EyePositionRight.xy };
+            float2 fovea = eyePositions[isRightEye] * 0.5 + 0.5;
+            // add 1 because the border is not included in the coords; add accumulated deformation
+            float2 vertexUV = (float2(coords) + float2(1,1)) / float2(Width + 1, Height + 1) + pointIn;
+            float p_distance = distance(fovea, vertexUV); 
+            
+            float a = min(0.33, -0.125 * CamVelocity + 0.455) * 4.0;
+            float b = -0.25 * a + 0.2 * min(CamVelocity, 1.0);
+            float scale = a * p_distance + b;
+            
+            float2 motionVec = motionVectors.SampleLevel(sampler_motionVectors, float3(vertexUV, isRightEye), 4) * 0.8 * IsMoving;
+            velocity = min(length(motionVec), 1.0 / Width)  * normalize(motionVec)  * scale; 
+        }
+        else
+            velocity = velocities[id.x];
+        float stiffness = clamp(contrast.SampleLevel(sampler_contrast, float3(pointIn, isRightEye), 4), 0.01, 0.7);
+        float step = 1.0 / 50;
+        float damping = 0.9;
+
+        float2 f1 = float2(0, 0);
+        float2 f2 = float2(0, 0);
+        float2 f3 = float2(0, 0);
+        float2 f4 = float2(0, 0);
+        if (Iteration == 0)
+            pointsPrev[id.x] = pointIn;
+        else
+        {
+            float2 displace_n1 = pointIn - neighbor1 - (pointIn_prev - n1_prev);
+            float2 displace_n2 = pointIn - neighbor2 - (pointIn_prev - n2_prev);
+            float2 displace_n3 = neighbor3 - pointIn - (n3_prev - pointIn_prev);
+            float2 displace_n4 = neighbor4 - pointIn - (n4_prev - pointIn_prev);
+            f1 = -stiffness * displace_n1;
+            f2 = -stiffness * displace_n2;
+            f3 = -stiffness * displace_n3;
+            f4 = -stiffness * displace_n4;
+        }
+
+        float2 velocity_new = velocity + step * (f1 + f2 + f3 + f4) * damping; // v(n+1)
+        velocities[id.x] = velocity_new;
+        float2 newPoint = pointIn + step * velocity_new; // p(n+1)
+        points[id.x + !isOddIteration * NumPoints] = normalize(newPoint) * min(length(newPoint), 0.2); // limit to maximum deformation
+    }
+}

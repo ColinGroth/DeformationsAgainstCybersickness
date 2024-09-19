@@ -1,0 +1,34 @@
+#pragma kernel SaccadeReset
+
+RWStructuredBuffer<float2> points;
+float4 EyePositions[2];
+float4 _EyeMovementVector[2];
+uint _Width;
+uint _Height;
+uint _NumPoints;
+
+[numthreads(64, 1, 1)]
+void SaccadeReset(uint3 id : SV_DispatchThreadID)
+{
+    if (id.x < _NumPoints)
+    {
+        int isRightEye = id.x * 2 / _NumPoints;
+        uint2 coords = uint2(id.x % _Width, (id.x / _Width) % _Height);
+        float2 pointIn = points[id.x];
+        float2 vertexUV = (float2(coords) + float2(1, 1)) / float2(_Width + 1, _Height + 1) + pointIn;
+        float2 normEyeMove = normalize(_EyeMovementVector[isRightEye].xy);
+        float2 eyePos = (EyePositions[isRightEye].xy * 0.5 + 0.5);
+        float2 gazeToPixel = vertexUV - eyePos;
+        float dotProduct = dot(normalize(gazeToPixel), normEyeMove);
+        
+        if (dotProduct < 0.0)
+        {
+            float distanceToLine = length(dot(normEyeMove, vertexUV) - dot(normEyeMove, eyePos));
+            points[id.x] = max((1 - distanceToLine * 1.5), 0) * length(pointIn) * normalize(pointIn); 
+            return;
+        }
+        
+        // subtract constant number from point
+        points[id.x] = length(pointIn) * 0.99844 * normalize(pointIn);
+    }
+}
