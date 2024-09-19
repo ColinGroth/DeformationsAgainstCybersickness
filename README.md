@@ -1,5 +1,7 @@
 # Cybersickness Reduction via Gaze-Contingent Image Deformation
 
+![Awesome teaser here](teaser.jpg)
+
 This repository contains an example project developed in Unity to demonstrate the method described in the paper *Cybersickness Reduction via Gaze-Contingent Image Deformation* (Groth et al., 2024). Due to copyright restrictions, the 3D environments used in the original experiment are not included. However, the example scene provided allows you to test the core functionalities of the proposed method.
 
 For more details on the methodology, please refer to the [project page](https://graphics.tu-bs.de/publications/groth2024cybersickness) or [pdf](https://graphics.tu-bs.de/upload/publications/TOG24_Groth_sickness.pdf).
